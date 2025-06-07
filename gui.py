@@ -14,6 +14,7 @@ from lexer import cilly_lexer
 from cilly_parser_module import cilly_parser
 from compile import cilly_vm_compiler
 from vm import CillyVM, cilly_vm_dis # 导入 CillyVM 类
+from transpiler import cilly_to_js # 导入 Transpiler
 from yufa import tests # 导入测试用例
 
 class CompilerWorker(QObject):
@@ -129,9 +130,13 @@ class CillyGUI(QMainWindow):
         self.right_panel = QWidget()
         self.right_layout = QVBoxLayout(self.right_panel)
         
-        # 运行按钮
+        # 按钮布局
+        self.button_layout = QHBoxLayout()
         self.run_button = QPushButton("Run")
-        self.right_layout.addWidget(self.run_button)
+        self.transpile_button = QPushButton("Transpile to JS")
+        self.button_layout.addWidget(self.run_button)
+        self.button_layout.addWidget(self.transpile_button)
+        self.right_layout.addLayout(self.button_layout)
 
         # 选项卡
         self.tabs = QTabWidget()
@@ -140,9 +145,11 @@ class CillyGUI(QMainWindow):
         self.token_view = QTextBrowser()
         self.ast_view = QTextBrowser()
         self.bytecode_view = QTextBrowser()
+        self.js_view = QTextBrowser() # 新增 JS 视图
 
         self.tabs.addTab(self.code_editor, "Code Editor")
         self.tabs.addTab(self.output_console, "Output")
+        self.tabs.addTab(self.js_view, "JavaScript") # 新增 JS 选项卡
         self.tabs.addTab(self.token_view, "Tokens")
         self.tabs.addTab(self.ast_view, "AST")
         self.tabs.addTab(self.bytecode_view, "Bytecode")
@@ -181,6 +188,7 @@ class CillyGUI(QMainWindow):
     def connect_signals(self):
         """连接所有信号和槽。"""
         self.run_button.clicked.connect(self.run_code)
+        self.transpile_button.clicked.connect(self.transpile_code)
         self.test_list_widget.itemDoubleClicked.connect(self.load_test_case)
 
     def load_test_case(self, item):
@@ -189,6 +197,36 @@ class CillyGUI(QMainWindow):
         if test_name in tests:
             self.code_editor.setPlainText(tests[test_name])
             self.tabs.setCurrentWidget(self.code_editor)
+
+    def transpile_code(self):
+        """
+        仅执行词法分析、语法分析和 JS 转换。
+        """
+        code = self.code_editor.toPlainText()
+        if not code.strip():
+            QMessageBox.warning(self, "Warning", "Code editor is empty.")
+            return
+            
+        try:
+            # 1. 词法分析
+            tokens = cilly_lexer(code)
+
+            # 2. 语法分析
+            ast = cilly_parser(tokens)
+
+            # 3. 转换为 JS
+            js_code = cilly_to_js(ast)
+            
+            # 在 UI 中显示结果
+            self.js_view.setText(js_code)
+            self.token_view.setText(pprint.pformat(tokens))
+            self.ast_view.setText(pprint.pformat(ast))
+            self.tabs.setCurrentWidget(self.js_view)
+
+        except Exception as e:
+            import traceback
+            self.output_console.setText(f"An error occurred during transpilation:\n{traceback.format_exc()}")
+            self.tabs.setCurrentWidget(self.output_console)
 
     def run_code(self):
         """触发编译和执行流程。"""
