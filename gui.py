@@ -4,10 +4,13 @@ import pprint
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPlainTextEdit, QPushButton, QTabWidget, QListWidget,
                              QSplitter, QTextBrowser, QFileDialog, QMessageBox, QGraphicsView, QGraphicsScene,
-                             QTextEdit)
-from PyQt5.QtCore import QObject, QThread, pyqtSignal, Qt, QSize, QRect, QPointF, QLineF, QTimer
+                             QTextEdit, QLabel, QFrame)
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, Qt, QSize, QRect, QPointF, QLineF, QTimer, QProcess
 from PyQt5.QtGui import QFont, QPainter, QColor, QTextFormat, QPolygonF, QBrush, QPen
 from math import sin, cos
+import subprocess
+import tempfile
+import os
 
 # 导入 Cilly 编译器模块
 from lexer import cilly_lexer
@@ -101,6 +104,60 @@ class CompilerWorker(QObject):
             self.finished.emit()
 
 
+class JavaScriptRunner(QObject):
+    """
+    在单独的线程中运行 JavaScript 代码。
+    """
+    finished = pyqtSignal()
+    output_ready = pyqtSignal(str)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, js_code):
+        super().__init__()
+        self.js_code = js_code
+
+    def run(self):
+        """
+        执行 JavaScript 代码并返回输出。
+        """
+        try:
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+                f.write(self.js_code)
+                temp_file = f.name
+
+            try:
+                # 运行 Node.js
+                result = subprocess.run(
+                    ['node', temp_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=10  # 10秒超时
+                )
+
+                if result.returncode == 0:
+                    self.output_ready.emit(result.stdout)
+                else:
+                    self.error_occurred.emit(f"JavaScript Error:\n{result.stderr}")
+
+            except subprocess.TimeoutExpired:
+                self.error_occurred.emit("JavaScript execution timed out (10 seconds)")
+            except FileNotFoundError:
+                self.error_occurred.emit("Node.js not found. Please install Node.js to run JavaScript code.")
+            finally:
+                # 清理临时文件
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+
+        except Exception as e:
+            import traceback
+            self.error_occurred.emit(f"Error running JavaScript:\n{traceback.format_exc()}")
+        finally:
+            self.finished.emit()
+
+
 class CillyGUI(QMainWindow):
     """
     Cilly IDE 的主窗口。
@@ -132,10 +189,14 @@ class CillyGUI(QMainWindow):
         
         # 按钮布局
         self.button_layout = QHBoxLayout()
-        self.run_button = QPushButton("Run")
+        self.run_button = QPushButton("Run Cilly")
         self.transpile_button = QPushButton("Transpile to JS")
+        self.run_js_button = QPushButton("Run JavaScript")
+        self.compare_button = QPushButton("Compare Results")
         self.button_layout.addWidget(self.run_button)
         self.button_layout.addWidget(self.transpile_button)
+        self.button_layout.addWidget(self.run_js_button)
+        self.button_layout.addWidget(self.compare_button)
         self.right_layout.addLayout(self.button_layout)
 
         # 选项卡
@@ -145,11 +206,15 @@ class CillyGUI(QMainWindow):
         self.token_view = QTextBrowser()
         self.ast_view = QTextBrowser()
         self.bytecode_view = QTextBrowser()
-        self.js_view = QTextBrowser() # 新增 JS 视图
+        self.js_view = QTextBrowser() # JS 代码视图
+        self.js_output_view = QTextBrowser() # JS 输出视图
+        self.compare_view = self.create_compare_view() # 对比视图
 
         self.tabs.addTab(self.code_editor, "Code Editor")
-        self.tabs.addTab(self.output_console, "Output")
-        self.tabs.addTab(self.js_view, "JavaScript") # 新增 JS 选项卡
+        self.tabs.addTab(self.output_console, "Cilly Output")
+        self.tabs.addTab(self.js_view, "JavaScript Code")
+        self.tabs.addTab(self.js_output_view, "JavaScript Output")
+        self.tabs.addTab(self.compare_view, "Compare Results")
         self.tabs.addTab(self.token_view, "Tokens")
         self.tabs.addTab(self.ast_view, "AST")
         self.tabs.addTab(self.bytecode_view, "Bytecode")
@@ -170,6 +235,10 @@ class CillyGUI(QMainWindow):
         self.populate_test_cases()
         self.connect_signals()
 
+        # 存储运行结果用于对比
+        self.cilly_output = ""
+        self.js_output = ""
+
     def setup_editor(self):
         """设置代码编辑器字体和行号。"""
         font = QFont()
@@ -180,6 +249,34 @@ class CillyGUI(QMainWindow):
         self.code_editor.setFont(font)
         # 简单的行号实现可以后续添加
 
+    def create_compare_view(self):
+        """创建对比视图。"""
+        compare_widget = QWidget()
+        layout = QHBoxLayout(compare_widget)
+
+        # 左侧：Cilly 输出
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_label = QLabel("Cilly Output:")
+        left_label.setStyleSheet("font-weight: bold; color: blue;")
+        self.cilly_compare_output = QTextBrowser()
+        left_layout.addWidget(left_label)
+        left_layout.addWidget(self.cilly_compare_output)
+
+        # 右侧：JavaScript 输出
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_label = QLabel("JavaScript Output:")
+        right_label.setStyleSheet("font-weight: bold; color: green;")
+        self.js_compare_output = QTextBrowser()
+        right_layout.addWidget(right_label)
+        right_layout.addWidget(self.js_compare_output)
+
+        layout.addWidget(left_panel)
+        layout.addWidget(right_panel)
+
+        return compare_widget
+
     def populate_test_cases(self):
         """从 yufa.py 加载测试用例到列表中。"""
         for test_name in tests:
@@ -189,6 +286,8 @@ class CillyGUI(QMainWindow):
         """连接所有信号和槽。"""
         self.run_button.clicked.connect(self.run_code)
         self.transpile_button.clicked.connect(self.transpile_code)
+        self.run_js_button.clicked.connect(self.run_javascript)
+        self.compare_button.clicked.connect(self.compare_results)
         self.test_list_widget.itemDoubleClicked.connect(self.load_test_case)
 
     def load_test_case(self, item):
@@ -227,6 +326,51 @@ class CillyGUI(QMainWindow):
             import traceback
             self.output_console.setText(f"An error occurred during transpilation:\n{traceback.format_exc()}")
             self.tabs.setCurrentWidget(self.output_console)
+
+    def run_javascript(self):
+        """运行 JavaScript 代码。"""
+        js_code = self.js_view.toPlainText()
+        if not js_code.strip():
+            QMessageBox.warning(self, "Warning", "No JavaScript code to run. Please transpile Cilly code first.")
+            return
+
+        self.run_js_button.setEnabled(False)
+        self.js_output_view.clear()
+
+        # 创建并启动 JavaScript 运行线程
+        self.js_thread = QThread()
+        self.js_worker = JavaScriptRunner(js_code)
+        self.js_worker.moveToThread(self.js_thread)
+
+        # 连接信号
+        self.js_thread.started.connect(self.js_worker.run)
+        self.js_worker.finished.connect(self.js_thread.quit)
+        self.js_worker.finished.connect(self.js_worker.deleteLater)
+        self.js_thread.finished.connect(self.js_thread.deleteLater)
+        self.js_worker.output_ready.connect(self.on_js_output_ready)
+        self.js_worker.error_occurred.connect(self.on_js_error)
+
+        self.js_thread.start()
+
+    def on_js_output_ready(self, output):
+        """JavaScript 运行成功时的处理。"""
+        self.js_output = output
+        self.js_output_view.setText(output)
+        self.tabs.setCurrentWidget(self.js_output_view)
+        self.run_js_button.setEnabled(True)
+
+    def on_js_error(self, error_message):
+        """JavaScript 运行出错时的处理。"""
+        self.js_output = f"Error: {error_message}"
+        self.js_output_view.setText(self.js_output)
+        self.tabs.setCurrentWidget(self.js_output_view)
+        self.run_js_button.setEnabled(True)
+
+    def compare_results(self):
+        """对比 Cilly 和 JavaScript 的运行结果。"""
+        self.cilly_compare_output.setText(self.cilly_output)
+        self.js_compare_output.setText(self.js_output)
+        self.tabs.setCurrentWidget(self.compare_view)
 
     def run_code(self):
         """触发编译和执行流程。"""
@@ -283,12 +427,14 @@ class CillyGUI(QMainWindow):
         self.token_view.setText(pprint.pformat(results["tokens"]))
         self.ast_view.setText(pprint.pformat(results["ast"]))
         self.bytecode_view.setText(results["bytecode"])
-        self.output_console.setText(results["output"])
+        self.cilly_output = results["output"]  # 保存 Cilly 输出用于对比
+        self.output_console.setText(self.cilly_output)
         self.tabs.setCurrentWidget(self.output_console)
         self.run_button.setEnabled(True)
 
     def on_compilation_error(self, error_message):
         """当编译出错时更新 UI。"""
+        self.cilly_output = error_message  # 保存错误信息用于对比
         self.output_console.setText(error_message)
         self.tabs.setCurrentWidget(self.output_console)
         self.run_button.setEnabled(True)
