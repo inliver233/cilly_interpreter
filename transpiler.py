@@ -129,7 +129,7 @@ class CillyToJsTranspiler:
         else: # Variable: ['define', name, value]
             _, name, value_node = node
             value_js = self.visit(value_node)
-            return f"let {name} = {value_js}"
+            return f"var {name} = {value_js}"
 
     def translate_call(self, node):
         _, func_expr, args = node

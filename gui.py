@@ -99,7 +99,7 @@ class CompilerWorker(QObject):
 
         except Exception as e:
             import traceback
-            self.error_occurred.emit(f"An error occurred:\n{traceback.format_exc()}")
+            self.error_occurred.emit(f"发生错误:\n{traceback.format_exc()}")
         finally:
             self.finished.emit()
 
@@ -138,12 +138,12 @@ class JavaScriptRunner(QObject):
                 if result.returncode == 0:
                     self.output_ready.emit(result.stdout)
                 else:
-                    self.error_occurred.emit(f"JavaScript Error:\n{result.stderr}")
+                    self.error_occurred.emit(f"JavaScript 错误:\n{result.stderr}")
 
             except subprocess.TimeoutExpired:
-                self.error_occurred.emit("JavaScript execution timed out (10 seconds)")
+                self.error_occurred.emit("JavaScript 执行超时 (10 秒)")
             except FileNotFoundError:
-                self.error_occurred.emit("Node.js not found. Please install Node.js to run JavaScript code.")
+                self.error_occurred.emit("未找到 Node.js。请安装 Node.js 以运行 JavaScript 代码。")
             finally:
                 # 清理临时文件
                 try:
@@ -153,7 +153,7 @@ class JavaScriptRunner(QObject):
 
         except Exception as e:
             import traceback
-            self.error_occurred.emit(f"Error running JavaScript:\n{traceback.format_exc()}")
+            self.error_occurred.emit(f"运行 JavaScript 时出错:\n{traceback.format_exc()}")
         finally:
             self.finished.emit()
 
@@ -164,10 +164,22 @@ class CillyGUI(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Cilly IDE")
+        self.setWindowTitle("Cilly 集成开发环境")
         self.setGeometry(100, 100, 1200, 800)
 
         # --- UI 组件 ---
+        # 测试用例翻译映射
+        self.test_case_translation = {
+            "Basic Arithmetic": "基础算术",
+            "Variable Scoping": "变量作用域",
+            "Conditional Statements": "条件语句",
+            "Variable Name Display": "变量名显示",
+            "Mutual Recursion": "相互递归",
+            "Fern Turtle Graphics": "海龟绘图：蕨类"
+        }
+        # 创建反向映射以便加载代码
+        self.reverse_test_case_translation = {v: k for k, v in self.test_case_translation.items()}
+        
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QHBoxLayout(self.central_widget)
@@ -189,10 +201,10 @@ class CillyGUI(QMainWindow):
         
         # 按钮布局
         self.button_layout = QHBoxLayout()
-        self.run_button = QPushButton("Run Cilly")
-        self.transpile_button = QPushButton("Transpile to JS")
-        self.run_js_button = QPushButton("Run JavaScript")
-        self.compare_button = QPushButton("Compare Results")
+        self.run_button = QPushButton("运行 Cilly")
+        self.transpile_button = QPushButton("转译为 JS")
+        self.run_js_button = QPushButton("运行 JavaScript")
+        self.compare_button = QPushButton("对比结果")
         self.button_layout.addWidget(self.run_button)
         self.button_layout.addWidget(self.transpile_button)
         self.button_layout.addWidget(self.run_js_button)
@@ -210,14 +222,14 @@ class CillyGUI(QMainWindow):
         self.js_output_view = QTextBrowser() # JS 输出视图
         self.compare_view = self.create_compare_view() # 对比视图
 
-        self.tabs.addTab(self.code_editor, "Code Editor")
-        self.tabs.addTab(self.output_console, "Cilly Output")
-        self.tabs.addTab(self.js_view, "JavaScript Code")
-        self.tabs.addTab(self.js_output_view, "JavaScript Output")
-        self.tabs.addTab(self.compare_view, "Compare Results")
-        self.tabs.addTab(self.token_view, "Tokens")
-        self.tabs.addTab(self.ast_view, "AST")
-        self.tabs.addTab(self.bytecode_view, "Bytecode")
+        self.tabs.addTab(self.code_editor, "代码编辑器")
+        self.tabs.addTab(self.output_console, "Cilly 输出")
+        self.tabs.addTab(self.js_view, "JavaScript 代码")
+        self.tabs.addTab(self.js_output_view, "JavaScript 输出")
+        self.tabs.addTab(self.compare_view, "对比结果")
+        self.tabs.addTab(self.token_view, "词法单元")
+        self.tabs.addTab(self.ast_view, "抽象语法树")
+        self.tabs.addTab(self.bytecode_view, "字节码")
         
         self.right_layout.addWidget(self.tabs)
         self.splitter.addWidget(self.right_panel)
@@ -227,7 +239,7 @@ class CillyGUI(QMainWindow):
 
         # 绘图窗口
         self.drawing_view = TurtleCanvas()
-        self.drawing_view.setWindowTitle("Cilly Drawing Canvas")
+        self.drawing_view.setWindowTitle("Cilly 绘图画布")
         self.drawing_view.setGeometry(200, 200, 800, 600)  # 设置更大的窗口尺寸
 
         # --- 初始化和连接 ---
@@ -257,7 +269,7 @@ class CillyGUI(QMainWindow):
         # 左侧：Cilly 输出
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_label = QLabel("Cilly Output:")
+        left_label = QLabel("Cilly 输出:")
         left_label.setStyleSheet("font-weight: bold; color: blue;")
         self.cilly_compare_output = QTextBrowser()
         left_layout.addWidget(left_label)
@@ -266,7 +278,7 @@ class CillyGUI(QMainWindow):
         # 右侧：JavaScript 输出
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
-        right_label = QLabel("JavaScript Output:")
+        right_label = QLabel("JavaScript 输出:")
         right_label.setStyleSheet("font-weight: bold; color: green;")
         self.js_compare_output = QTextBrowser()
         right_layout.addWidget(right_label)
@@ -279,8 +291,10 @@ class CillyGUI(QMainWindow):
 
     def populate_test_cases(self):
         """从 yufa.py 加载测试用例到列表中。"""
-        for test_name in tests:
-            self.test_list_widget.addItem(test_name)
+        for test_name_en in tests:
+            # 使用翻译后的名称添加到列表
+            test_name_cn = self.test_case_translation.get(test_name_en, test_name_en)
+            self.test_list_widget.addItem(test_name_cn)
 
     def connect_signals(self):
         """连接所有信号和槽。"""
@@ -292,9 +306,11 @@ class CillyGUI(QMainWindow):
 
     def load_test_case(self, item):
         """加载选定的测试用例到编辑器。"""
-        test_name = item.text()
-        if test_name in tests:
-            self.code_editor.setPlainText(tests[test_name])
+        test_name_cn = item.text()
+        # 使用反向映射找到原始的英文键
+        test_name_en = self.reverse_test_case_translation.get(test_name_cn, test_name_cn)
+        if test_name_en in tests:
+            self.code_editor.setPlainText(tests[test_name_en])
             self.tabs.setCurrentWidget(self.code_editor)
 
     def transpile_code(self):
@@ -303,7 +319,7 @@ class CillyGUI(QMainWindow):
         """
         code = self.code_editor.toPlainText()
         if not code.strip():
-            QMessageBox.warning(self, "Warning", "Code editor is empty.")
+            QMessageBox.warning(self, "警告", "代码编辑器为空。")
             return
             
         try:
@@ -324,14 +340,14 @@ class CillyGUI(QMainWindow):
 
         except Exception as e:
             import traceback
-            self.output_console.setText(f"An error occurred during transpilation:\n{traceback.format_exc()}")
+            self.output_console.setText(f"转译过程中发生错误:\n{traceback.format_exc()}")
             self.tabs.setCurrentWidget(self.output_console)
 
     def run_javascript(self):
         """运行 JavaScript 代码。"""
         js_code = self.js_view.toPlainText()
         if not js_code.strip():
-            QMessageBox.warning(self, "Warning", "No JavaScript code to run. Please transpile Cilly code first.")
+            QMessageBox.warning(self, "警告", "没有可运行的 JavaScript 代码。请先转译 Cilly 代码。")
             return
 
         self.run_js_button.setEnabled(False)
@@ -376,7 +392,7 @@ class CillyGUI(QMainWindow):
         """触发编译和执行流程。"""
         code = self.code_editor.toPlainText()
         if not code.strip():
-            QMessageBox.warning(self, "Warning", "Code editor is empty.")
+            QMessageBox.warning(self, "警告", "代码编辑器为空。")
             return
 
         self.run_button.setEnabled(False)
@@ -627,7 +643,7 @@ class TurtleCanvas(QGraphicsView):
             try:
                 self.pen_color = QColor(color_name)
             except:
-                print(f"Warning: Invalid color name '{color_name}'")
+                print(f"警告: 无效的颜色名称 '{color_name}'")
                 self.pen_color = QColor("black") # Fallback to black
 
         self.animation_queue.append(do_pencolor)
